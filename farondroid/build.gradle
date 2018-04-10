@@ -102,6 +102,7 @@ android {
         compile 'commons-logging:commons-logging-api:1.1'
         compile 'commons-io:commons-io:2.4'
         compile 'org.apache.commons:commons-compress:1.16.1'
+        compile 'org.tukaani:xz:1.8'
         compile 'commons-net:commons-net:3.4'
         compile ('commons-httpclient:commons-httpclient:3.1') {
             exclude group: 'commons-logging', module: 'commons-logging'
