@@ -143,7 +143,7 @@
     <string name="create_bookmark">Create bookmark</string>
     <string name="bookmark_created">Bookmark created</string>
     <string name="progress">Progress</string>
-    <string name="selected_files" formatted="false">%s in %s files</string>
+    <string name="selected_files" formatted="false">%s in %d files</string>
 
     <string name="regular_expression">Regular expression</string>
     <string name="select_found">Select found</string>
@@ -411,4 +411,15 @@ More network stuff will appear in future versions.
 
     <string name="include_files">Include files</string>
     <string name="include_folders">Include folders</string>
+
+    <string name="text_search_options">Search text options</string>
+    <string name="advanced_search">Advanced search options</string>
+
+    <string name="date_after">After</string>
+    <string name="date_before">Before</string>
+
+    <string name="bigger_than">Bigger than</string>
+    <string name="smaller_than">Smaller than</string>
+    <string name="search_result">Search result</string>
+
 </resources>

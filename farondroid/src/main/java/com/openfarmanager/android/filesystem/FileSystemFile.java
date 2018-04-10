@@ -1,8 +1,10 @@
 package com.openfarmanager.android.filesystem;
 
+import com.annimon.stream.Stream;
 import com.openfarmanager.android.model.Bookmark;
 
 import java.io.File;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
@@ -16,9 +18,14 @@ public class FileSystemFile extends File implements FileProxy<File> {
     private boolean mIsBookmark;
     private boolean mIsVirtualDirectory;
     private Bookmark mBookmark;
+    private List<FileProxy> mChildren;
 
     public FileSystemFile(String path) {
         super(path);
+    }
+
+    public FileSystemFile(File file) {
+        super(file.getParent(), file.getName());
     }
 
     public FileSystemFile(File dir, String name) {
@@ -29,6 +36,14 @@ public class FileSystemFile extends File implements FileProxy<File> {
         super(dir, name);
         mBookmark = bookmark;
         mIsBookmark = true;
+
+        File[] children = listFiles();
+        if (children != null) {
+            mChildren = new ArrayList<>(children.length);
+            Stream.of(children).forEach(child -> mChildren.add(new FileSystemFile(child.getAbsolutePath())));
+        } else {
+            mChildren = new ArrayList<>();
+        }
     }
 
     public FileSystemFile(File dir, String name, boolean isVirtualDirectory) {
@@ -62,8 +77,8 @@ public class FileSystemFile extends File implements FileProxy<File> {
     }
 
     @Override
-    public List<File> getChildren() {
-        return Arrays.asList(listFiles());
+    public List<FileProxy> getChildren() {
+        return mChildren;
     }
 
     @Override

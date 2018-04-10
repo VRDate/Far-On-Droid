@@ -34,10 +34,6 @@ public class MainTips {
 
     public MainTips(Activity activity, FileSystemController controller, MainToolbar panel) {
 
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.HONEYCOMB) {
-            return;
-        }
-
         mActivity = activity;
         mFileSystemController = controller;
         mMainToolbarPanel = panel;
@@ -73,7 +69,7 @@ public class MainTips {
         float density = mActivity.getResources().getDisplayMetrics().density;
 
         if (mCurrentStep == 0) {
-            int selectedFiles = panel.select(new SelectParams("*", false, true, true));
+            int selectedFiles = panel.select(new SelectParams("*", false, false, true, true));
             if (selectedFiles == 0) {
                 // skip "selected files"
                 mCurrentStep = 2;

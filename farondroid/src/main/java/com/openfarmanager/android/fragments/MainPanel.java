@@ -1,5 +1,6 @@
 package com.openfarmanager.android.fragments;
 
+import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
 import android.app.Dialog;
 import android.content.Context;
@@ -43,7 +44,10 @@ import com.openfarmanager.android.filesystem.commands.CreateBookmarkCommand;
 import com.openfarmanager.android.filesystem.commands.DropboxCommand;
 import com.openfarmanager.android.filesystem.commands.ExportAsCommand;
 import com.openfarmanager.android.filesystem.commands.GoogleDriveUpdateCommand;
-import com.openfarmanager.android.filesystem.filter.FileTypeFilter;
+import com.openfarmanager.android.filesystem.filter.DateFilter;
+import com.openfarmanager.android.filesystem.filter.FileFilter;
+import com.openfarmanager.android.filesystem.filter.FileNameFilter;
+import com.openfarmanager.android.filesystem.search.SearchOptions;
 import com.openfarmanager.android.model.Bookmark;
 import com.openfarmanager.android.model.FileActionEnum;
 import com.openfarmanager.android.model.OpenDirectoryActionListener;
@@ -57,10 +61,7 @@ import com.openfarmanager.android.view.ActionBar;
 import com.openfarmanager.android.view.FileSystemListView;
 import com.openfarmanager.android.view.ToastNotification;
 
-import org.apache.commons.io.filefilter.WildcardFileFilter;
-
 import java.io.File;
-import java.io.FileFilter;
 import java.util.*;
 
 import io.reactivex.android.schedulers.AndroidSchedulers;
@@ -106,7 +107,7 @@ public class MainPanel extends BaseFileSystemPanel {
     public View onCreateView(LayoutInflater inflater, ViewGroup container, Bundle savedInstanceState) {
         setupHandler();
         View view = inflater.inflate(R.layout.main_panel, container, false);
-        mFileSystemList = (FileSystemListView) view.findViewById(android.R.id.list);
+        mFileSystemList = (FileSystemListView) view.findViewById(R.id.file_system_view);
         mProgress = (ProgressBar) view.findViewById(R.id.loading);
         mSelectedFilesSize = (TextView) view.findViewById(R.id.selected_files_size);
 
@@ -196,43 +197,9 @@ public class MainPanel extends BaseFileSystemPanel {
             }
         });
 
-        setupGestures(mFileSystemList);
+        setupGestures(mFileSystemList.getRecyclerView());
 
-        mQuickActionPopup = new QuickPopupDialog(getActivity(), view, R.layout.quick_action_popup);
-        mQuickActionPopup.setPosition((getPanelLocation() == LEFT_PANEL ? Gravity.LEFT : Gravity.RIGHT) | Gravity.TOP,
-                (int) (50 * getResources().getDisplayMetrics().density));
-        View layout = mQuickActionPopup.getContentView();
-        layout.findViewById(R.id.quick_action_copy).setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                gainFocus();
-                mHandler.sendMessage(mHandler.obtainMessage(FILE_ACTION, FileActionEnum.COPY));
-            }
-        });
-
-        layout.findViewById(R.id.quick_action_delete).setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                gainFocus();
-                mHandler.sendMessage(mHandler.obtainMessage(FILE_ACTION, FileActionEnum.DELETE));
-            }
-        });
-
-        layout.findViewById(R.id.quick_action_select).setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                selectAll();
-                invalidate(false);
-            }
-        });
-
-        layout.findViewById(R.id.quick_action_deselect).setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                unselectAll();
-                invalidate(false);
-            }
-        });
+        mQuickActionPopup = new QuickPopupFileActionsView(getActivity(), view, getPanelLocation());
 
         postInitialization();
         setNavigationButtonsVisibility();
@@ -400,14 +367,6 @@ public class MainPanel extends BaseFileSystemPanel {
         }
     }
 
-//    @Override
-//    public void onDestroy() {
-//        if (mSubscriptions != null) {
-//            mSubscriptions.unsubscribe();
-//        }
-//        super.onDestroy();
-//    }
-
     @TargetApi(Build.VERSION_CODES.LOLLIPOP)
     @Override
     public void onActivityResult(int requestCode, int resultCode, Intent data) {
@@ -446,16 +405,11 @@ public class MainPanel extends BaseFileSystemPanel {
     }
 
     protected void calculateSelectedFilesSize() {
-
         if (!App.sInstance.getSettings().isShowSelectedFilesSize()) {
             return;
         }
 
-        long size = 0;
-        for (FileProxy f : mSelectedFiles) {
-            size += f.isDirectory() ? 0 : f.getSize();
-        }
-
+        long size = Stream.of(mSelectedFiles).filter(f -> !f.isDirectory()).mapToLong(FileProxy::getSize).sum();
         mSelectedFilesSize.setText(getString(R.string.selected_files, CustomFormatter.formatBytes(size), mSelectedFiles.size()));
     }
 
@@ -910,72 +864,23 @@ public class MainPanel extends BaseFileSystemPanel {
     @Override
     public int select(SelectParams selectParams) {
 
-        if (mBaseDir == null) {
-            // handle unexpected situation.
-            return 0;
-        }
-
         mSelectedFiles.clear();
-        if (selectParams.getType() == SelectParams.SelectionType.NAME) {
 
-            String pattern = selectParams.getSelectionString();
+        List<FileProxy> allFiles = getAdapter().getFiles();
 
-            App.sInstance.getSharedPreferences("action_dialog", 0).edit(). putString("select_pattern", pattern).apply();
-
-            File[] contents = mBaseDir.listFiles(new FileTypeFilter(selectParams.isIncludeFiles(),
-                    selectParams.isIncludeFolders()).addFilter(new WildcardFileFilter(pattern)).
-                    setInverseSelection(selectParams.isInverseSelection()));
-
-            Stream.of(contents).forEach(file -> mSelectedFiles.add(new FileSystemFile(file.getAbsolutePath())));
-        } else {
-            File[] allFiles = mBaseDir.listFiles(new FileTypeFilter(selectParams.isIncludeFiles(), selectParams.isIncludeFolders()));
-            if (selectParams.isTodayDate()) {
-
-                Calendar today = Calendar.getInstance();
-                Calendar currentDay = Calendar.getInstance();
-
-                for (File file : allFiles) {
-                    currentDay.setTime(new Date(file.lastModified()));
-                    if (isSameDay(today, currentDay)) {
-                        mSelectedFiles.add(new FileSystemFile(file.getAbsolutePath()));
-                    }
-                }
-            } else {
-                long startDate = selectParams.getDateFrom().getTime();
-                long endDate = selectParams.getDateTo().getTime();
-                for (File file : allFiles) {
-                    if (file.lastModified() > startDate && file.lastModified() < endDate) {
-                        mSelectedFiles.add(new FileSystemFile(file.getAbsolutePath()));
-                    }
-                }
-            }
-
-        }
+        FileFilter fileFilter = selectParams.getType() == SelectParams.SelectionType.NAME ?
+                new FileNameFilter(selectParams) : new DateFilter(selectParams);
+        mSubscriptions.add(fileFilter.filter(allFiles).subscribe(list -> mSelectedFiles.addAll(list), Throwable::printStackTrace));
 
         FileSystemAdapter adapter = getAdapter();
         adapter.setSelectedFiles(mSelectedFiles);
         adapter.notifyDataSetChanged();
+
         setSelectedFilesSizeVisibility();
         calculateSelectedFilesSize();
         showQuickActionPanel();
 
         return mSelectedFiles.size();
-    }
-
-    /**
-     * <p>Checks if two calendars represent the same day ignoring time.</p>
-     * @param cal1  the first calendar, not altered, not null
-     * @param cal2  the second calendar, not altered, not null
-     * @return true if they represent the same day
-     * @throws IllegalArgumentException if either calendar is <code>null</code>
-     */
-    public static boolean isSameDay(Calendar cal1, Calendar cal2) {
-        if (cal1 == null || cal2 == null) {
-            throw new IllegalArgumentException("The dates must not be null");
-        }
-        return (cal1.get(Calendar.ERA) == cal2.get(Calendar.ERA) &&
-                cal1.get(Calendar.YEAR) == cal2.get(Calendar.YEAR) &&
-                cal1.get(Calendar.DAY_OF_YEAR) == cal2.get(Calendar.DAY_OF_YEAR));
     }
 
     public void addSelectedFiles(LinkedHashSet<File> selectedFiles) {
@@ -988,11 +893,11 @@ public class MainPanel extends BaseFileSystemPanel {
 
         final FileSystemAdapter adapter = getAdapter();
         adapter.setSelectedFiles(mSelectedFiles);
-        getActivity().runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                adapter.notifyDataSetChanged();
-            }
+        getActivity().runOnUiThread(() -> {
+            adapter.notifyDataSetChanged();
+            setSelectedFilesSizeVisibility();
+            calculateSelectedFilesSize();
+            showQuickActionPanel();
         });
     }
 
@@ -1093,6 +998,7 @@ public class MainPanel extends BaseFileSystemPanel {
         }
     };
 
+    @SuppressLint("HandlerLeak")
     protected Handler mFileActionHandler = new Handler() {
 
         @Override
@@ -1148,7 +1054,7 @@ public class MainPanel extends BaseFileSystemPanel {
                     break;
                 case SEARCH_ACTION:
                     try {
-                        SearchActionDialog.SearchActionResult result = (SearchActionDialog.SearchActionResult) msg.obj;
+                        SearchOptions result = (SearchOptions) msg.obj;
                         showDialog(new SearchResultDialog(getActivity(), result.isNetworkPanel ? ((NetworkPanel) MainPanel.this).getNetworkType() : null,
                                 getCurrentPath(), result, new SearchResultDialog.SearchResultListener() {
                             @Override
@@ -1157,14 +1063,10 @@ public class MainPanel extends BaseFileSystemPanel {
                                     gotoSearchFile(fileProxy);
                                 } else {
                                     final File file = (FileSystemFile) fileProxy;
-                                    openDirectory(file.isDirectory() ? file : file.getParentFile());
-                                    if (!file.isDirectory()) {
-                                        addSelectedFiles(new LinkedHashSet<File>() {{
-                                            add(file);
-                                        }});
-                                        calculateSelectedFilesSize();
-                                    }
-                                    invalidate();
+                                    openDirectory(file.getParentFile());
+                                    addSelectedFiles(new LinkedHashSet<File>() {{
+                                        add(file);
+                                    }});
                                 }
                             }
 

@@ -17,7 +17,6 @@ import android.view.Window;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import com.annimon.stream.Stream;
 import com.openfarmanager.android.App;
 import com.openfarmanager.android.R;
 import com.openfarmanager.android.adapters.FileSystemAdapter;
@@ -37,7 +36,8 @@ import com.openfarmanager.android.core.network.datasource.YandexDiskDataSource;
 import com.openfarmanager.android.dialogs.CreateBookmarkDialog;
 import com.openfarmanager.android.filesystem.FakeFile;
 import com.openfarmanager.android.filesystem.FileProxy;
-import com.openfarmanager.android.filesystem.filter.FileTypeFilter;
+import com.openfarmanager.android.filesystem.filter.FileFilter;
+import com.openfarmanager.android.filesystem.filter.FileNameFilter;
 import com.openfarmanager.android.model.Bookmark;
 import com.openfarmanager.android.model.FileActionEnum;
 import com.openfarmanager.android.model.NetworkAccount;
@@ -52,6 +52,7 @@ import com.openfarmanager.android.view.NetworkActionBar;
 import com.openfarmanager.android.view.ToastNotification;
 
 import org.apache.commons.io.FilenameUtils;
+import org.apache.commons.io.IOCase;
 import org.json.JSONObject;
 
 import java.util.ArrayList;
@@ -65,6 +66,7 @@ import io.reactivex.SingleOnSubscribe;
 import io.reactivex.android.schedulers.AndroidSchedulers;
 import io.reactivex.disposables.CompositeDisposable;
 import io.reactivex.disposables.Disposable;
+import io.reactivex.functions.Consumer;
 import io.reactivex.schedulers.Schedulers;
 
 import static com.openfarmanager.android.controllers.FileSystemController.EXIT_FROM_NETWORK_STORAGE;
@@ -391,7 +393,7 @@ public class NetworkPanel extends MainPanel {
         setSelectedFilesSizeVisibility();
         setIsLoading(true);
 
-        Single.create((SingleOnSubscribe<DirectoryUiInfo>) emitter -> {
+        addDisposable(Single.create((SingleOnSubscribe<DirectoryUiInfo>) emitter -> {
             try {
                 DirectoryScanInfo scanInfo = mDataSource.openDirectory(file);
 
@@ -404,52 +406,39 @@ public class NetworkPanel extends MainPanel {
                 emitter.onError(e);
             }
         }).subscribeOn(Schedulers.io()).
-                observeOn(AndroidSchedulers.mainThread()).subscribe(new SingleObserver<DirectoryUiInfo>() {
-            @Override
-            public void onSubscribe(Disposable d) {
-                addDisposable(d);
+                observeOn(AndroidSchedulers.mainThread()).subscribe(directoryInfo -> {
+            setIsLoading(false);
+
+            FileProxy fileProxy = directoryInfo.directory;
+            String path = fileProxy.getFullPathRaw();
+
+            setCurrentPath(path);
+            boolean isRoot = Extensions.isNullOrEmpty(fileProxy.getParentPath()) || fileProxy.getFullPathRaw().equals("/");
+            NetworkEntryAdapter adapter = (NetworkEntryAdapter) mFileSystemList.getAdapter();
+
+            mUpNavigator = new FakeFile(fileProxy.getParentPath(), "..", directoryInfo.parentPath,
+                    FileUtilsExt.getParentPath(fileProxy.getFullPathRaw()), isRoot);
+            if (adapter != null) {
+                adapter.setItems(directoryInfo.files, mUpNavigator);
+                adapter.setSelectedFiles(mSelectedFiles);
+            } else {
+                mFileSystemList.initAdapter(new NetworkEntryAdapter(directoryInfo.files, mUpNavigator));
             }
+            mCurrentPath = new FakeFile(fileProxy.getId(), path, fileProxy.getParentPath(), fileProxy.getFullPathRaw(), isRoot);
 
-            @Override
-            public void onSuccess(DirectoryUiInfo directoryInfo) {
-                setIsLoading(false);
-
-                FileProxy file = directoryInfo.directory;
-                String path = file.getFullPathRaw();
-
-                setCurrentPath(path);
-                boolean isRoot = Extensions.isNullOrEmpty(file.getParentPath()) || file.getFullPathRaw().equals("/");
-                NetworkEntryAdapter adapter = (NetworkEntryAdapter) mFileSystemList.getAdapter();
-
-                mUpNavigator = new FakeFile(file.getParentPath(), "..", directoryInfo.parentPath,
-                        FileUtilsExt.getParentPath(file.getFullPathRaw()), isRoot);
-                if (adapter != null) {
-                    adapter.setItems(directoryInfo.files, mUpNavigator);
-                    adapter.setSelectedFiles(mSelectedFiles);
-                } else {
-                    mFileSystemList.initAdapter(new NetworkEntryAdapter(directoryInfo.files, mUpNavigator));
-                }
-                mCurrentPath = new FakeFile(file.getId(), path, file.getParentPath(), file.getFullPathRaw(), isRoot);
-
-                if (directoryInfo.restorePosition) {
-                    Integer selection = mDirectorySelection.get(isRoot ? "/" : path);
-                    ((LinearLayoutManager) mFileSystemList.getLayoutManager()).scrollToPositionWithOffset(selection != null ? selection : 0, 0);
-
-                }
-
-                if (mPreSelectedFiles.size() > 0) {
-                    calculateSelectedFilesSize();
-                }
-                showQuickActionPanel();
-                setSelectedFilesSizeVisibility();
+            if (directoryInfo.restorePosition) {
+                Integer selection = mDirectorySelection.get(isRoot ? "/" : path);
+                ((LinearLayoutManager) mFileSystemList.getLayoutManager()).scrollToPositionWithOffset(selection != null ? selection : 0, 0);
 
             }
 
-            @Override
-            public void onError(Throwable e) {
-                handleNetworkException((NetworkException) e);
+            if (mPreSelectedFiles.size() > 0) {
+                calculateSelectedFilesSize();
             }
-        });
+            showQuickActionPanel();
+            setSelectedFilesSizeVisibility();
+        }, throwable -> handleNetworkException((NetworkException) throwable)));
+
     }
 
     protected void handleNetworkException(NetworkException e) {
@@ -590,55 +579,6 @@ public class NetworkPanel extends MainPanel {
             ToastNotification.makeText(App.sInstance.getApplicationContext(),
                     getSafeString(R.string.error_restore_storage_path), Toast.LENGTH_SHORT).show();
         }
-    }
-
-    @Override
-    public int select(SelectParams selectParams) {
-        NetworkEntryAdapter adapter = (NetworkEntryAdapter) mFileSystemList.getAdapter();
-        List<FileProxy> allFiles = adapter.getFiles();
-
-        allFiles = Stream.of(allFiles).filter(f -> f.isDirectory() ? selectParams.isIncludeFolders() : selectParams.isIncludeFiles()).toList();
-        mSelectedFiles.clear();
-        if (selectParams.getType() == SelectParams.SelectionType.NAME) {
-            String pattern = selectParams.getSelectionString();
-            App.sInstance.getSharedPreferences("action_dialog", 0).edit(). putString("select_pattern", pattern).apply();
-            List<FileProxy> contents = Stream.of(allFiles).filter(file -> {
-                boolean match = FilenameUtils.wildcardMatch(file.getName(), pattern);
-                return selectParams.isInverseSelection() != match;
-            }).toList();
-
-            mSelectedFiles.addAll(contents);
-        } else {
-            if (selectParams.isTodayDate()) {
-
-                Calendar today = Calendar.getInstance();
-                Calendar currentDay = Calendar.getInstance();
-
-                for (FileProxy file : allFiles) {
-                    currentDay.setTime(new Date(file.lastModifiedDate()));
-                    if (isSameDay(today, currentDay)) {
-                        mSelectedFiles.add(file);
-                    }
-                }
-            } else {
-                long startDate = selectParams.getDateFrom().getTime();
-                long endDate = selectParams.getDateTo().getTime();
-                for (FileProxy file : allFiles) {
-                    if (file.lastModifiedDate() > startDate && file.lastModifiedDate() < endDate) {
-                        mSelectedFiles.add(file);
-                    }
-                }
-            }
-        }
-
-        adapter.setSelectedFiles(mSelectedFiles);
-        adapter.notifyDataSetChanged();
-
-        setSelectedFilesSizeVisibility();
-        calculateSelectedFilesSize();
-        showQuickActionPanel();
-
-        return mSelectedFiles.size();
     }
 
     private void handleError(NetworkException e) {

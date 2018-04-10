@@ -10,6 +10,7 @@ import android.view.ViewGroup;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import com.futuremind.recyclerviewfastscroll.SectionTitleProvider;
 import com.openfarmanager.android.App;
 import com.openfarmanager.android.R;
 import com.openfarmanager.android.core.Settings;
@@ -34,7 +35,7 @@ import java.util.List;
 /**
  * @author Vlad Namashko
  */
-public class FileSystemAdapter extends RecyclerView.Adapter<FileSystemAdapter.ViewHolder> {
+public class FileSystemAdapter extends RecyclerView.Adapter<FileSystemAdapter.ViewHolder> implements SectionTitleProvider {
 
     private static float sScaledDensity;
 
@@ -71,6 +72,10 @@ public class FileSystemAdapter extends RecyclerView.Adapter<FileSystemAdapter.Vi
             return new FileSystemFile(mBaseDir, "..");
         }
         return mFiles.get(i - 1);
+    }
+
+    public List<FileProxy> getFiles() {
+        return mFiles;
     }
 
     private void setColor(TextView name, TextView size, int color) {
@@ -255,6 +260,18 @@ public class FileSystemAdapter extends RecyclerView.Adapter<FileSystemAdapter.Vi
 
     public void setOnItemClickListener(OnItemClickListener onItemClickListener) {
         mOnItemClickListener = onItemClickListener;
+    }
+
+    @Override
+    public String getSectionTitle(int position) {
+        if (position == 0) {
+            return "";
+        } else {
+            FileProxy fileProxy = (FileProxy) getItem(position);
+            return fileProxy.getName().substring(0, 1);
+        }
+
+//        return getItem(position).substring(0, 1);
     }
 
     public static class ViewHolder extends RecyclerView.ViewHolder {
